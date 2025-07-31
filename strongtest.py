@@ -3,22 +3,12 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import math
 import os, subprocess
 os.environ["CXX"] = "/opt/homebrew/opt/llvm/bin/clang++"
 os.environ["CC"] = "/opt/homebrew/opt/llvm/bin/clang"
 os.environ["CXXFLAGS"] = "-isysroot " + subprocess.check_output(["xcrun","--show-sdk-path"], text=True).strip() + " -stdlib=libc++"
-epochCONST = 10000
+
 # USE PYPEARL VERSION 0.4.7, support on other packages not guaranteed
-def pypearl_init(m):
-    if isinstance(m, nn.Linear):
-        fan_in, fan_out = m.weight.size()   # (out, in) → (fan_out, fan_in)
-        # nn.init calculates fan_in/fan_out the other way round,
-        # so we just reproduce your formula explicitly
-        limit = math.sqrt(6.0 / (fan_in + fan_out))
-        with torch.no_grad():
-            nn.init.uniform_(m.weight, -0.5 * limit, 0.5 * limit)  # extra ×0.5
-            nn.init.constant_(m.bias, 0.0)                        # biases = 0
 
 x = ArrayD2(3, 2)
 for i in range(3):
@@ -30,11 +20,19 @@ y[0, 3] = 1
 y[1, 1] = 1
 y[2, 0] = 1
 
-l1 = Layer(2, 4)
+l1 = Layer(2, 100)
 
-r = ReLU()
+r1 = ReLU()
 
-l2 = Layer(4, 4)
+l2 = Layer(100, 100)
+
+r2 = ReLU()
+
+l3 = Layer(100, 100)
+
+r3 = ReLU()
+
+l4 = Layer(100, 4)
 
 s = Softmax()
 
@@ -42,24 +40,34 @@ c = CCE()
 
 o = SGD()
 
-epochs = epochCONST
+epochs = 1000
 t0 = time.perf_counter()
 for i in range(epochs):
     v1 = l1.forward(x)
-    v2 = r.forward(v1)
+    v2 = r1.forward(v1)
     v3 = l2.forward(v2)
-    v4 = s.forward(v3)
+    v4 = r2.forward(v3)
+    v5 = l3.forward(v4)
+    v6 = r3.forward(v5)
+    v7 = l4.forward(v6)
+    v8 = s.forward(v7)
 
-    loss = c.forward(v4, y)
+    loss = c.forward(v8, y)
 
     if i == 0:
         initloss = loss
-    dval = c.backward(v4, y)
-    dval3 = l2.backward(dval)
-    dval4 = r.backward(dval3)
-    l1.backward(dval4)
+    dval = c.backward(v8, y)
+    dval2 = l4.backward(dval)
+    dval3 = r3.backward(dval2)
+    dval4 = l3.backward(dval3)
+    dval5 = r2.backward(dval4)
+    dval6 = l2.backward(dval5)
+    dval7 = r1.backward(dval6)
+    l1.backward(dval7)
     o.optimize(l1)
     o.optimize(l2)
+    o.optimize(l3)
+    o.optimize(l4)
 t1 = time.perf_counter()
 elapsed = t1 - t0
 
@@ -79,12 +87,16 @@ for i in range(3):
 y = torch.tensor([3, 1, 0], dtype=torch.long, device=device)
 
 model = nn.Sequential(
-    nn.Linear(2, 4),
+    nn.Linear(2, 100),
     nn.ReLU(),
-    nn.Linear(4, 4)
+    nn.Linear(100, 100),
+    nn.ReLU(),
+    nn.Linear(100, 100),
+    nn.ReLU(),
+    nn.Linear(100, 4)
 ).to(device)
 
-model.apply(pypearl_init)
+
 
 criterion  = nn.CrossEntropyLoss()
 optimizer  = optim.SGD(model.parameters(), lr=1e-3)
@@ -93,7 +105,7 @@ if torch.__version__ >= "2.0":
     model   = torch.compile(model, backend=backend, mode="max-autotune")
 
 
-epochs = epochCONST
+epochs = 1000
 
 t0 = time.perf_counter()
 init_loss = None
